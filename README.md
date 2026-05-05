@@ -29,3 +29,7 @@ npm run dev
 ```
 
 Then open the local URL Vite prints in the terminal.
+
+## GitHub Pages
+
+Pushes to `main` deploy through GitHub Actions. The production site is built with the `/havengrid/` base path for GitHub Pages.
