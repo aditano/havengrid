@@ -61,6 +61,10 @@ export default function AtlasMap({
   const showPower = scenarioId === "power";
   const showQuakes = scenarioId === "earthquake" || scenarioId === "overview";
   const showNuclearTarget = scenarioId === "nuclear" && nuclearTarget;
+  const visualRenderer = useMemo(
+    () => L.canvas({ padding: 0.35, pane: VISUAL_OVERLAY_PANE }),
+    [],
+  );
 
   return (
     <div className="atlas-map-wrap">
@@ -81,6 +85,7 @@ export default function AtlasMap({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <VisualOverlayPane />
         <CountyRiskLayer
           scenarioId={scenarioId}
           preparedness={preparedness}
@@ -97,6 +102,7 @@ export default function AtlasMap({
             <CircleMarker
               center={selected.point}
               radius={8}
+              renderer={visualRenderer}
               interactive={false}
               pathOptions={{
                 color: "#111827",
@@ -112,6 +118,7 @@ export default function AtlasMap({
             <CircleMarker
               center={nuclearTarget.point}
               radius={11}
+              renderer={visualRenderer}
               interactive={false}
               pathOptions={{
                 color: "#7f1d1d",
@@ -123,6 +130,7 @@ export default function AtlasMap({
             <CircleMarker
               center={nuclearTarget.point}
               radius={4}
+              renderer={visualRenderer}
               interactive={false}
               pathOptions={{
                 color: "#7f1d1d",
@@ -139,6 +147,7 @@ export default function AtlasMap({
                   key={ring.label}
                   center={nuclearTarget.point}
                   radius={ring.radiusKm * 1000}
+                  renderer={visualRenderer}
                   interactive={false}
                   pathOptions={{
                     color: ring.color,
@@ -150,6 +159,7 @@ export default function AtlasMap({
               ))}
             <Polygon
               positions={falloutPolygon(nuclearTarget.point, bomb.yieldKt, windDirection)}
+              renderer={visualRenderer}
               interactive={false}
               pathOptions={{
                 color: "#5b21b6",
@@ -167,6 +177,7 @@ export default function AtlasMap({
                 key={quake.id}
                 center={[quake.lat, quake.lon]}
                 radius={Math.max(4, Math.min(13, quake.magnitude * 2.5))}
+                renderer={visualRenderer}
                 interactive={false}
                 pathOptions={{
                   color: "#6d28d9",
@@ -268,6 +279,16 @@ function MapKey({
       ) : null}
     </div>
   );
+}
+
+function VisualOverlayPane() {
+  const map = useMap();
+
+  useEffect(() => {
+    ensureVisualOverlayPane(map);
+  }, [map]);
+
+  return null;
 }
 
 function CountyRiskLayer({
