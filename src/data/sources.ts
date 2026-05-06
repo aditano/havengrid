@@ -77,6 +77,11 @@ export type SelectedCounty = {
   point: LatLngLiteral;
 };
 
+export type MapTarget = {
+  attrs?: CountyAttributes;
+  point: LatLngLiteral;
+};
+
 export type WeatherAlert = {
   id: string;
   event: string;

@@ -19,6 +19,7 @@ import {
   fetchLiveData,
   type CountyAttributes,
   type LiveData,
+  type MapTarget,
   type SelectedCounty,
 } from "./data/sources";
 import { BOMB_PROFILES } from "./lib/nuclear";
@@ -52,9 +53,13 @@ const scenarioIcons = {
   drought: SunMedium,
 };
 
+type MapClickTarget = "home" | "blast";
+
 export default function App() {
   const [scenarioId, setScenarioId] = useState<ScenarioId>("overview");
   const [selected, setSelected] = useState<SelectedCounty | null>(null);
+  const [nuclearTarget, setNuclearTarget] = useState<MapTarget | null>(null);
+  const [mapClickTarget, setMapClickTarget] = useState<MapClickTarget>("home");
   const [counties, setCounties] = useState<CountyAttributes[]>([]);
   const [countyLoadError, setCountyLoadError] = useState<string | null>(null);
   const [liveData, setLiveData] = useState<LiveData | undefined>();
@@ -66,6 +71,7 @@ export default function App() {
   const selectedBomb =
     BOMB_PROFILES.find((profile) => profile.id === bombId) ?? BOMB_PROFILES[1];
   const scenario = SCENARIOS.find((item) => item.id === scenarioId) ?? SCENARIOS[0];
+  const activeMapClickTarget = scenarioId === "nuclear" ? mapClickTarget : "home";
   const selectedScore = selected
     ? calculateCountyScore(selected.attrs, scenarioId, preparedness, liveData)
     : undefined;
@@ -95,6 +101,12 @@ export default function App() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (scenarioId !== "nuclear" && mapClickTarget !== "home") {
+      setMapClickTarget("home");
+    }
+  }, [mapClickTarget, scenarioId]);
 
   useEffect(() => {
     if (!selected) {
@@ -152,10 +164,13 @@ export default function App() {
             scenarioId={scenarioId}
             preparedness={preparedness}
             selected={selected}
+            nuclearTarget={nuclearTarget}
             liveData={liveData}
             bomb={selectedBomb}
             windDirection={windDirection}
+            mapClickTarget={activeMapClickTarget}
             onCountySelect={setSelected}
+            onNuclearTargetSelect={setNuclearTarget}
           />
         </section>
 
@@ -206,6 +221,51 @@ export default function App() {
                 ))}
               </select>
               <p className="field-note">{selectedBomb.description}</p>
+
+              <div className="field-label" id="map-click-target-label">
+                Map click target
+              </div>
+              <div
+                className="segmented-control"
+                role="group"
+                aria-labelledby="map-click-target-label"
+              >
+                <button
+                  className={mapClickTarget === "home" ? "active" : ""}
+                  type="button"
+                  onClick={() => setMapClickTarget("home")}
+                >
+                  Home county
+                </button>
+                <button
+                  className={mapClickTarget === "blast" ? "active" : ""}
+                  type="button"
+                  onClick={() => setMapClickTarget("blast")}
+                >
+                  Ground zero
+                </button>
+              </div>
+              <div className="target-readout">
+                <div>
+                  <span>Home county</span>
+                  <strong>{selected ? countyName(selected.attrs) : "None selected"}</strong>
+                </div>
+                <div>
+                  <span>Ground zero</span>
+                  <strong>{formatTargetName(nuclearTarget)}</strong>
+                </div>
+              </div>
+              {selected ? (
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() =>
+                    setNuclearTarget({ attrs: selected.attrs, point: selected.point })
+                  }
+                >
+                  Use home point
+                </button>
+              ) : null}
 
               <label className="field-label" htmlFor="wind-direction">
                 Fallout wind direction
@@ -466,6 +526,18 @@ function RankingList({
       )}
     </div>
   );
+}
+
+function formatTargetName(target: MapTarget | null): string {
+  if (!target) {
+    return "None selected";
+  }
+
+  if (target.attrs) {
+    return countyName(target.attrs);
+  }
+
+  return `${target.point.lat.toFixed(3)}, ${target.point.lng.toFixed(3)}`;
 }
 
 function refreshLiveData(

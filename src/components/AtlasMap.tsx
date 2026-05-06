@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
 import { Circle, CircleMarker, MapContainer, Polygon, TileLayer, useMap } from "react-leaflet";
 import * as esri from "esri-leaflet";
-import type { BombProfile } from "../lib/nuclear";
+import type { BlastRing, BombProfile } from "../lib/nuclear";
 import { falloutPolygon, getBlastRings } from "../lib/nuclear";
 import {
   DROUGHT_LAYER,
@@ -11,6 +11,7 @@ import {
   POWER_OUTAGE_LAYER,
   type CountyAttributes,
   type LiveData,
+  type MapTarget,
   type SelectedCounty,
 } from "../data/sources";
 import {
@@ -25,28 +26,38 @@ type AtlasMapProps = {
   scenarioId: ScenarioId;
   preparedness: Preparedness;
   selected: SelectedCounty | null;
+  nuclearTarget: MapTarget | null;
   liveData?: LiveData;
   bomb: BombProfile;
   windDirection: number;
+  mapClickTarget: MapClickTarget;
   onCountySelect: (selection: SelectedCounty) => void;
+  onNuclearTargetSelect: (target: MapTarget) => void;
 };
+
+type MapClickTarget = "home" | "blast";
 
 const US_CENTER: [number, number] = [39.5, -98.35];
 const STYLE_CACHE_LIMIT = 50000;
+const VISUAL_OVERLAY_PANE = "visual-overlay-pane";
 
 export default function AtlasMap({
   scenarioId,
   preparedness,
   selected,
+  nuclearTarget,
   liveData,
   bomb,
   windDirection,
+  mapClickTarget,
   onCountySelect,
+  onNuclearTargetSelect,
 }: AtlasMapProps) {
   const blastRings = useMemo(() => getBlastRings(bomb), [bomb]);
   const showDrought = ["drought", "food", "wildfire"].includes(scenarioId);
   const showPower = scenarioId === "power";
   const showQuakes = scenarioId === "earthquake" || scenarioId === "overview";
+  const showNuclearTarget = scenarioId === "nuclear" && nuclearTarget;
 
   return (
     <div className="atlas-map-wrap">
@@ -71,7 +82,9 @@ export default function AtlasMap({
           scenarioId={scenarioId}
           preparedness={preparedness}
           selectedFips={selected?.attrs.STCOFIPS}
+          mapClickTarget={mapClickTarget}
           onCountySelect={onCountySelect}
+          onNuclearTargetSelect={onNuclearTargetSelect}
         />
         {showDrought ? <DroughtOverlay /> : null}
         {showPower ? <PowerOverlay /> : null}
@@ -81,6 +94,7 @@ export default function AtlasMap({
             <CircleMarker
               center={selected.point}
               radius={8}
+              interactive={false}
               pathOptions={{
                 color: "#111827",
                 fillColor: "#ffffff",
@@ -90,16 +104,39 @@ export default function AtlasMap({
             />
           </>
         ) : null}
-        {selected && scenarioId === "nuclear" ? (
+        {showNuclearTarget ? (
           <>
+            <CircleMarker
+              center={nuclearTarget.point}
+              radius={11}
+              interactive={false}
+              pathOptions={{
+                color: "#7f1d1d",
+                fillColor: "#fee2e2",
+                fillOpacity: 1,
+                weight: 3,
+              }}
+            />
+            <CircleMarker
+              center={nuclearTarget.point}
+              radius={4}
+              interactive={false}
+              pathOptions={{
+                color: "#7f1d1d",
+                fillColor: "#dc2626",
+                fillOpacity: 1,
+                weight: 1,
+              }}
+            />
             {blastRings
               .slice()
               .reverse()
               .map((ring) => (
                 <Circle
                   key={ring.label}
-                  center={selected.point}
+                  center={nuclearTarget.point}
                   radius={ring.radiusKm * 1000}
+                  interactive={false}
                   pathOptions={{
                     color: ring.color,
                     fillColor: ring.color,
@@ -109,7 +146,8 @@ export default function AtlasMap({
                 />
               ))}
             <Polygon
-              positions={falloutPolygon(selected.point, bomb.yieldKt, windDirection)}
+              positions={falloutPolygon(nuclearTarget.point, bomb.yieldKt, windDirection)}
+              interactive={false}
               pathOptions={{
                 color: "#5b21b6",
                 fillColor: "#7c3aed",
@@ -126,6 +164,7 @@ export default function AtlasMap({
                 key={quake.id}
                 center={[quake.lat, quake.lon]}
                 radius={Math.max(4, Math.min(13, quake.magnitude * 2.5))}
+                interactive={false}
                 pathOptions={{
                   color: "#6d28d9",
                   fillColor: "#a855f7",
@@ -136,21 +175,92 @@ export default function AtlasMap({
             ))
           : null}
       </MapContainer>
-      <div className="map-legend" aria-label="Map score legend">
+      <MapKey
+        scenarioId={scenarioId}
+        selected={selected}
+        nuclearTarget={nuclearTarget}
+        blastRings={blastRings}
+        showDrought={showDrought}
+        showPower={showPower}
+        showQuakes={showQuakes}
+      />
+    </div>
+  );
+}
+
+function MapKey({
+  scenarioId,
+  selected,
+  nuclearTarget,
+  blastRings,
+  showDrought,
+  showPower,
+  showQuakes,
+}: {
+  scenarioId: ScenarioId;
+  selected: SelectedCounty | null;
+  nuclearTarget: MapTarget | null;
+  blastRings: BlastRing[];
+  showDrought: boolean;
+  showPower: boolean;
+  showQuakes: boolean;
+}) {
+  return (
+    <div className="map-key" aria-label="Map key">
+      <div className="map-key-title">Map key</div>
+      <div className="key-row score-key">
         <span className="legend-chip low" />
-        <span>Worst</span>
         <span className="legend-track" />
-        <span>Best</span>
         <span className="legend-chip high" />
+        <strong>Low to high continuity score</strong>
       </div>
-      {selected && scenarioId === "nuclear" ? (
-        <div className="blast-legend">
-          {blastRings.map((ring) => (
-            <span key={ring.label}>
-              <i style={{ backgroundColor: ring.color }} />
-              {ring.label} {ring.radiusKm.toFixed(ring.radiusKm > 10 ? 0 : 1)} km
-            </span>
-          ))}
+      {selected ? (
+        <div className="key-row">
+          <span className="key-symbol home-pin" />
+          <span>Home county marker</span>
+        </div>
+      ) : null}
+      {scenarioId === "nuclear" ? (
+        <>
+          <div className="key-row">
+            <span className="key-symbol ground-zero-pin" />
+            <span>Ground zero marker</span>
+          </div>
+          {nuclearTarget
+            ? blastRings.map((ring) => (
+                <div className="key-row" key={ring.label}>
+                  <span
+                    className="key-symbol blast-ring"
+                    style={{ borderColor: ring.color, backgroundColor: ring.color }}
+                  />
+                  <span>
+                    {ring.label} {ring.radiusKm.toFixed(ring.radiusKm > 10 ? 0 : 1)} km
+                  </span>
+                </div>
+              ))
+            : null}
+          <div className="key-row">
+            <span className="key-symbol fallout-plume" />
+            <span>Purple fallout estimate</span>
+          </div>
+        </>
+      ) : null}
+      {showQuakes ? (
+        <div className="key-row">
+          <span className="key-symbol quake-dot" />
+          <span>Purple circles: recent USGS earthquakes</span>
+        </div>
+      ) : null}
+      {showDrought ? (
+        <div className="key-row">
+          <span className="key-symbol drought-wash" />
+          <span>Yellow to red wash: drought category</span>
+        </div>
+      ) : null}
+      {showPower ? (
+        <div className="key-row">
+          <span className="key-symbol outage-wash" />
+          <span>Yellow to red wash: outage share</span>
         </div>
       ) : null}
     </div>
@@ -161,21 +271,29 @@ function CountyRiskLayer({
   scenarioId,
   preparedness,
   selectedFips,
+  mapClickTarget,
   onCountySelect,
+  onNuclearTargetSelect,
 }: {
   scenarioId: ScenarioId;
   preparedness: Preparedness;
   selectedFips?: string;
+  mapClickTarget: MapClickTarget;
   onCountySelect: (selection: SelectedCounty) => void;
+  onNuclearTargetSelect: (target: MapTarget) => void;
 }) {
   const map = useMap();
   const layerRef = useRef<any>();
   const onCountySelectRef = useRef(onCountySelect);
+  const onNuclearTargetSelectRef = useRef(onNuclearTargetSelect);
   const stateRef = useRef({ scenarioId, preparedness, selectedFips });
+  const mapClickTargetRef = useRef(mapClickTarget);
   const colorCacheRef = useRef(new Map<string, string>());
   const countyRenderer = useMemo(() => L.canvas({ padding: 0.4 }), []);
   onCountySelectRef.current = onCountySelect;
+  onNuclearTargetSelectRef.current = onNuclearTargetSelect;
   stateRef.current = { scenarioId, preparedness, selectedFips };
+  mapClickTargetRef.current = mapClickTarget;
 
   useEffect(() => {
     const layer = esri.featureLayer({
@@ -200,10 +318,16 @@ function CountyRiskLayer({
       if (!attrs) {
         return;
       }
-      onCountySelectRef.current({
+      const target = {
         attrs,
         point: { lat: event.latlng.lat, lng: event.latlng.lng },
-      });
+      };
+
+      if (mapClickTargetRef.current === "blast") {
+        onNuclearTargetSelectRef.current(target);
+      } else {
+        onCountySelectRef.current(target);
+      }
     });
 
     layer.on("mouseover", (event: any) => {
@@ -258,13 +382,19 @@ function CountyRiskLayer({
 
 function DroughtOverlay() {
   const map = useMap();
-  const renderer = useMemo(() => L.canvas({ padding: 0.35 }), []);
+  const renderer = useMemo(
+    () => L.canvas({ padding: 0.35, pane: VISUAL_OVERLAY_PANE }),
+    [],
+  );
 
   useEffect(() => {
+    const pane = ensureVisualOverlayPane(map);
     const layer = esri.featureLayer({
       url: DROUGHT_LAYER,
       fields: ["dm", "update_dat"],
+      pane,
       renderer,
+      interactive: false,
       simplifyFactor: 0.9,
       precision: 3,
       style: (feature: { properties: { dm?: number } }) => droughtStyle(feature.properties.dm),
@@ -281,13 +411,19 @@ function DroughtOverlay() {
 
 function PowerOverlay() {
   const map = useMap();
-  const renderer = useMemo(() => L.canvas({ padding: 0.35 }), []);
+  const renderer = useMemo(
+    () => L.canvas({ padding: 0.35, pane: VISUAL_OVERLAY_PANE }),
+    [],
+  );
 
   useEffect(() => {
+    const pane = ensureVisualOverlayPane(map);
     const layer = esri.featureLayer({
       url: POWER_OUTAGE_LAYER,
       fields: ["perc_out", "customers_out", "name"],
+      pane,
       renderer,
+      interactive: false,
       simplifyFactor: 0.9,
       precision: 3,
       style: (feature: { properties: { perc_out?: number } }) => {
@@ -309,6 +445,13 @@ function PowerOverlay() {
   }, [map, renderer]);
 
   return null;
+}
+
+function ensureVisualOverlayPane(map: L.Map): string {
+  const pane = map.getPane(VISUAL_OVERLAY_PANE) ?? map.createPane(VISUAL_OVERLAY_PANE);
+  pane.style.zIndex = "430";
+  pane.style.pointerEvents = "none";
+  return VISUAL_OVERLAY_PANE;
 }
 
 function SelectionFocus({ selected }: { selected: SelectedCounty }) {
