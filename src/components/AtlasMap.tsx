@@ -40,9 +40,6 @@ type MapClickTarget = "home" | "blast";
 const US_CENTER: [number, number] = [39.5, -98.35];
 const STYLE_CACHE_LIMIT = 50000;
 const VISUAL_OVERLAY_PANE = "visual-overlay-pane";
-const COUNTY_RENDERER_PADDING = 0.18;
-const COUNTY_SIMPLIFY_FACTOR = 2.4;
-const COUNTY_PRECISION = 3;
 
 export default function AtlasMap({
   scenarioId,
@@ -313,7 +310,7 @@ function CountyRiskLayer({
   const stateRef = useRef({ scenarioId, preparedness, selectedFips });
   const mapClickTargetRef = useRef(mapClickTarget);
   const colorCacheRef = useRef(new Map<string, string>());
-  const countyRenderer = useMemo(() => L.canvas({ padding: COUNTY_RENDERER_PADDING }), []);
+  const countyRenderer = useMemo(() => L.canvas({ padding: 0.4 }), []);
   onCountySelectRef.current = onCountySelect;
   onNuclearTargetSelectRef.current = onNuclearTargetSelect;
   stateRef.current = { scenarioId, preparedness, selectedFips };
@@ -324,11 +321,9 @@ function CountyRiskLayer({
       url: NRI_COUNTY_LAYER,
       where: "STATEABBRV NOT IN ('AS','GU','MP','PR','VI')",
       fields: NRI_COUNTY_FIELDS,
-      cacheLayers: true,
-      debounceMoveend: true,
       renderer: countyRenderer,
-      simplifyFactor: COUNTY_SIMPLIFY_FACTOR,
-      precision: COUNTY_PRECISION,
+      simplifyFactor: 0.75,
+      precision: 4,
       style: (feature: { properties: CountyAttributes }) =>
         countyStyle(
           feature.properties,
