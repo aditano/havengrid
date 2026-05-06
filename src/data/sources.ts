@@ -24,14 +24,9 @@ export const NRI_COUNTY_FIELDS = [
   "POPULATION",
   "AREA",
   "RISK_SCORE",
-  "RISK_RATNG",
-  "EAL_SCORE",
   "SOVI_SCORE",
-  "SOVI_RATNG",
   "RESL_SCORE",
-  "RESL_RATNG",
   "AGRIVALUE",
-  "BUILDVALUE",
   "WFIR_RISKS",
   "HWAV_RISKS",
   "CFLD_RISKS",
@@ -46,7 +41,6 @@ export const NRI_COUNTY_FIELDS = [
   "ISTM_RISKS",
   "CWAV_RISKS",
   "DRGT_RISKS",
-  "NRI_VER",
 ];
 
 export type CountyAttributes = {
@@ -142,8 +136,20 @@ const DROUGHT_LABELS: Record<number, string> = {
 };
 
 const EXCLUDED_TERRITORIES = new Set(["AS", "GU", "MP", "PR", "VI"]);
+const COUNTY_ATTRIBUTES_CACHE_KEY = "havengrid:nri-county-attributes:v2";
+let countyAttributesCache: CountyAttributes[] | undefined;
 
 export async function fetchCountyAttributes(): Promise<CountyAttributes[]> {
+  if (countyAttributesCache) {
+    return countyAttributesCache;
+  }
+
+  const storedRows = readStoredCountyAttributes();
+  if (storedRows) {
+    countyAttributesCache = storedRows;
+    return storedRows;
+  }
+
   const rows: CountyAttributes[] = [];
   let offset = 0;
   const pageSize = 2000;
@@ -184,7 +190,41 @@ export async function fetchCountyAttributes(): Promise<CountyAttributes[]> {
     offset += pageSize;
   }
 
+  countyAttributesCache = rows;
+  writeStoredCountyAttributes(rows);
   return rows;
+}
+
+function readStoredCountyAttributes(): CountyAttributes[] | undefined {
+  try {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const stored = window.localStorage.getItem(COUNTY_ATTRIBUTES_CACHE_KEY);
+    if (!stored) {
+      return undefined;
+    }
+
+    const parsed = JSON.parse(stored) as unknown;
+    if (!Array.isArray(parsed)) {
+      return undefined;
+    }
+
+    return parsed as CountyAttributes[];
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStoredCountyAttributes(rows: CountyAttributes[]) {
+  try {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(COUNTY_ATTRIBUTES_CACHE_KEY, JSON.stringify(rows));
+    }
+  } catch {
+    // Storage can be unavailable or full. The app still works with the in-memory rows.
+  }
 }
 
 export async function fetchLiveData(

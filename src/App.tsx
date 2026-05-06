@@ -83,22 +83,24 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-
-    fetchCountyAttributes()
-      .then((rows) => {
-        if (active) {
-          setCounties(rows);
-          setCountyLoadError(null);
-        }
-      })
-      .catch((error) => {
-        if (active) {
-          setCountyLoadError(error instanceof Error ? error.message : "County data failed");
-        }
-      });
+    const cancelScheduledLoad = scheduleAfterFirstPaint(() => {
+      fetchCountyAttributes()
+        .then((rows) => {
+          if (active) {
+            setCounties(rows);
+            setCountyLoadError(null);
+          }
+        })
+        .catch((error) => {
+          if (active) {
+            setCountyLoadError(error instanceof Error ? error.message : "County data failed");
+          }
+        });
+    });
 
     return () => {
       active = false;
+      cancelScheduledLoad();
     };
   }, []);
 
@@ -538,6 +540,35 @@ function formatTargetName(target: MapTarget | null): string {
   }
 
   return `${target.point.lat.toFixed(3)}, ${target.point.lng.toFixed(3)}`;
+}
+
+function scheduleAfterFirstPaint(callback: () => void): () => void {
+  let timeoutId: number | undefined;
+  let idleId: number | undefined;
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+
+  const frameId = window.requestAnimationFrame(() => {
+    timeoutId = window.setTimeout(() => {
+      if (idleWindow.requestIdleCallback) {
+        idleId = idleWindow.requestIdleCallback(callback, { timeout: 2000 });
+      } else {
+        callback();
+      }
+    }, 350);
+  });
+
+  return () => {
+    window.cancelAnimationFrame(frameId);
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+    if (idleId && idleWindow.cancelIdleCallback) {
+      idleWindow.cancelIdleCallback(idleId);
+    }
+  };
 }
 
 function refreshLiveData(
