@@ -26,6 +26,7 @@ type AtlasMapProps = {
   scenarioId: ScenarioId;
   preparedness: Preparedness;
   selected: SelectedCounty | null;
+  selectedFillColor?: string;
   nuclearTarget: MapTarget | null;
   liveData?: LiveData;
   bomb: BombProfile;
@@ -45,6 +46,7 @@ export default function AtlasMap({
   scenarioId,
   preparedness,
   selected,
+  selectedFillColor,
   nuclearTarget,
   liveData,
   bomb,
@@ -87,6 +89,7 @@ export default function AtlasMap({
           scenarioId={scenarioId}
           preparedness={preparedness}
           selectedFips={selected?.attrs.STCOFIPS}
+          selectedFillColor={selectedFillColor}
           mapClickTarget={mapClickTarget}
           onCountySelect={onCountySelect}
           onNuclearTargetSelect={onNuclearTargetSelect}
@@ -292,6 +295,7 @@ function CountyRiskLayer({
   scenarioId,
   preparedness,
   selectedFips,
+  selectedFillColor,
   mapClickTarget,
   onCountySelect,
   onNuclearTargetSelect,
@@ -299,6 +303,7 @@ function CountyRiskLayer({
   scenarioId: ScenarioId;
   preparedness: Preparedness;
   selectedFips?: string;
+  selectedFillColor?: string;
   mapClickTarget: MapClickTarget;
   onCountySelect: (selection: SelectedCounty) => void;
   onNuclearTargetSelect: (target: MapTarget) => void;
@@ -307,13 +312,13 @@ function CountyRiskLayer({
   const layerRef = useRef<any>();
   const onCountySelectRef = useRef(onCountySelect);
   const onNuclearTargetSelectRef = useRef(onNuclearTargetSelect);
-  const stateRef = useRef({ scenarioId, preparedness, selectedFips });
+  const stateRef = useRef({ scenarioId, preparedness, selectedFips, selectedFillColor });
   const mapClickTargetRef = useRef(mapClickTarget);
   const colorCacheRef = useRef(new Map<string, string>());
   const countyRenderer = useMemo(() => L.canvas({ padding: 0.4 }), []);
   onCountySelectRef.current = onCountySelect;
   onNuclearTargetSelectRef.current = onNuclearTargetSelect;
-  stateRef.current = { scenarioId, preparedness, selectedFips };
+  stateRef.current = { scenarioId, preparedness, selectedFips, selectedFillColor };
   mapClickTargetRef.current = mapClickTarget;
 
   useEffect(() => {
@@ -331,6 +336,7 @@ function CountyRiskLayer({
           stateRef.current.preparedness,
           stateRef.current.selectedFips,
           colorCacheRef.current,
+          stateRef.current.selectedFillColor,
         ),
     });
 
@@ -369,6 +375,7 @@ function CountyRiskLayer({
             stateRef.current.preparedness,
             stateRef.current.selectedFips,
             colorCacheRef.current,
+            stateRef.current.selectedFillColor,
           ),
         );
       }
@@ -391,12 +398,13 @@ function CountyRiskLayer({
           preparedness,
           selectedFips,
           colorCacheRef.current,
+          selectedFillColor,
         ),
       );
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [preparedness, scenarioId, selectedFips]);
+  }, [preparedness, scenarioId, selectedFillColor, selectedFips]);
 
   return null;
 }
@@ -493,9 +501,13 @@ function countyStyle(
   preparedness: Preparedness,
   selectedFips?: string,
   colorCache?: Map<string, string>,
+  selectedFillColor?: string,
 ): L.PathOptions {
-  const fillColor = cachedScoreColor(attrs, scenarioId, preparedness, colorCache);
   const isSelected = selectedFips && attrs.STCOFIPS === selectedFips;
+  const fillColor =
+    isSelected && selectedFillColor
+      ? selectedFillColor
+      : cachedScoreColor(attrs, scenarioId, preparedness, colorCache);
 
   return {
     color: isSelected ? "#111827" : "#374151",

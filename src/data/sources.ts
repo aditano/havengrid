@@ -142,6 +142,7 @@ const DROUGHT_LABELS: Record<number, string> = {
 };
 
 const EXCLUDED_TERRITORIES = new Set(["AS", "GU", "MP", "PR", "VI"]);
+const COUNTY_FIPS = /^\d{5}$/;
 
 export async function fetchCountyAttributes(): Promise<CountyAttributes[]> {
   const rows: CountyAttributes[] = [];
@@ -300,8 +301,67 @@ async function fetchWeatherAlerts(point: LatLngLiteral): Promise<WeatherAlert[]>
   );
 }
 
+export function readQueryCentroid(payload: unknown): LatLngLiteral | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+
+  const features = (payload as { features?: unknown }).features;
+  if (!Array.isArray(features)) {
+    return undefined;
+  }
+
+  const feature = features[0];
+  if (!feature || typeof feature !== "object") {
+    return undefined;
+  }
+
+  const centroid = (feature as { centroid?: unknown }).centroid;
+  if (!centroid || typeof centroid !== "object") {
+    return undefined;
+  }
+
+  const lat = Number((centroid as { y?: unknown }).y);
+  const lng = Number((centroid as { x?: unknown }).x);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return undefined;
+  }
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return undefined;
+  }
+
+  return { lat, lng };
+}
+
+export async function fetchCountyCentroid(fips: string): Promise<LatLngLiteral | undefined> {
+  if (!COUNTY_FIPS.test(fips)) {
+    throw new Error("County id must be a 5-digit FIPS code");
+  }
+
+  const params = new URLSearchParams({
+    f: "json",
+    where: `STCOFIPS='${fips}'`,
+    outFields: "STCOFIPS",
+    returnGeometry: "false",
+    returnCentroid: "true",
+    outSR: "4326",
+    resultRecordCount: "1",
+  });
+  const response = await fetch(`${NRI_COUNTY_LAYER}/query?${params}`);
+  if (!response.ok) {
+    throw new Error(`County location request failed: ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (payload.error) {
+    throw new Error(payload.error.message ?? "County location request failed");
+  }
+
+  return readQueryCentroid(payload);
+}
+
 async function fetchPowerOutage(fips?: string): Promise<PowerOutage | undefined> {
-  if (!fips) {
+  if (!fips || !COUNTY_FIPS.test(fips)) {
     return undefined;
   }
   const params = new URLSearchParams({
@@ -372,6 +432,10 @@ async function fetchDroughtStatus(
   }
 
   const dm = Number(attrs.dm);
+  if (!Number.isFinite(dm)) {
+    return undefined;
+  }
+
   return {
     dm,
     label: DROUGHT_LABELS[dm] ?? "No drought category",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -14,15 +14,24 @@ import {
   Zap,
 } from "lucide-react";
 import AtlasMap from "./components/AtlasMap";
+import CountySearch from "./components/CountySearch";
+import LiveConditions from "./components/LiveConditions";
 import {
   fetchCountyAttributes,
+  fetchCountyCentroid,
   fetchLiveData,
   type CountyAttributes,
   type LiveData,
   type MapTarget,
   type SelectedCounty,
 } from "./data/sources";
-import { BOMB_PROFILES } from "./lib/nuclear";
+import {
+  assessNuclearExposure,
+  BOMB_PROFILES,
+  compassLabel,
+  distanceKm,
+  formatDistanceKm,
+} from "./lib/nuclear";
 import {
   SCENARIOS,
   calculateCountyScore,
@@ -31,8 +40,11 @@ import {
   rankCounties,
   scoreToColor,
   type Preparedness,
+  type RankedCounty,
   type ScenarioId,
 } from "./lib/score";
+
+const PREPAREDNESS_KEY = "havengrid:preparedness:v1";
 
 const DEFAULT_PREPAREDNESS: Preparedness = {
   supplyDays: 10,
@@ -41,7 +53,7 @@ const DEFAULT_PREPAREDNESS: Preparedness = {
   evacuationPlan: true,
 };
 
-const scenarioIcons = {
+const scenarioIcons: Record<ScenarioId, typeof Activity> = {
   overview: Activity,
   nuclear: Radiation,
   wildfire: Flame,
@@ -62,19 +74,34 @@ export default function App() {
   const [mapClickTarget, setMapClickTarget] = useState<MapClickTarget>("home");
   const [counties, setCounties] = useState<CountyAttributes[]>([]);
   const [countyLoadError, setCountyLoadError] = useState<string | null>(null);
+  const [countyReload, setCountyReload] = useState(0);
   const [liveData, setLiveData] = useState<LiveData | undefined>();
   const [liveLoading, setLiveLoading] = useState(false);
-  const [preparedness, setPreparedness] = useState(DEFAULT_PREPAREDNESS);
+  const [liveNonce, setLiveNonce] = useState(0);
+  const [preparedness, setPreparedness] = useState(readPreparedness);
   const [bombId, setBombId] = useState(BOMB_PROFILES[1].id);
   const [windDirection, setWindDirection] = useState(70);
+  const [locatingFips, setLocatingFips] = useState<string | null>(null);
+  const [locateError, setLocateError] = useState<string | null>(null);
+  const locateRequest = useRef(0);
+  const mapPanelRef = useRef<HTMLElement | null>(null);
 
   const selectedBomb =
     BOMB_PROFILES.find((profile) => profile.id === bombId) ?? BOMB_PROFILES[1];
   const scenario = SCENARIOS.find((item) => item.id === scenarioId) ?? SCENARIOS[0];
   const activeMapClickTarget = scenarioId === "nuclear" ? mapClickTarget : "home";
+  const exposure =
+    scenarioId === "nuclear" && selected && nuclearTarget
+      ? assessNuclearExposure(selected.point, nuclearTarget.point, selectedBomb, windDirection)
+      : undefined;
   const selectedScore = selected
-    ? calculateCountyScore(selected.attrs, scenarioId, preparedness, liveData)
+    ? calculateCountyScore(selected.attrs, scenarioId, preparedness, liveData, exposure)
     : undefined;
+  const selectedFillColor = selectedScore ? scoreToColor(selectedScore.score) : undefined;
+  const selectionKey = selected
+    ? `${selected.attrs.STCOFIPS ?? ""}:${selected.point.lat}:${selected.point.lng}`
+    : "";
+  const selectionKeyRef = useRef(selectionKey);
 
   const rankings = useMemo(
     () => rankCounties(counties, scenarioId, preparedness),
@@ -83,6 +110,7 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
+    setCountyLoadError(null);
 
     fetchCountyAttributes()
       .then((rows) => {
@@ -100,7 +128,15 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [countyReload]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PREPAREDNESS_KEY, JSON.stringify(preparedness));
+    } catch {
+      // Storage can be unavailable. The current session still keeps the controls.
+    }
+  }, [preparedness]);
 
   useEffect(() => {
     if (scenarioId !== "nuclear" && mapClickTarget !== "home") {
@@ -111,7 +147,14 @@ export default function App() {
   useEffect(() => {
     if (!selected) {
       setLiveData(undefined);
+      setLiveLoading(false);
       return;
+    }
+
+    const selectionChanged = selectionKeyRef.current !== selectionKey;
+    selectionKeyRef.current = selectionKey;
+    if (selectionChanged) {
+      setLiveData(undefined);
     }
 
     let active = true;
@@ -123,7 +166,7 @@ export default function App() {
         }
       })
       .catch(() => {
-        if (active) {
+        if (active && selectionChanged) {
           setLiveData(undefined);
         }
       })
@@ -136,7 +179,45 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [selected?.attrs.STCOFIPS, selected?.point.lat, selected?.point.lng]);
+  }, [selected, selectionKey, liveNonce]);
+
+  async function selectKnownCounty(attrs: CountyAttributes) {
+    const fips = attrs.STCOFIPS;
+    if (!fips) {
+      return;
+    }
+
+    const requestId = locateRequest.current + 1;
+    locateRequest.current = requestId;
+    setLocatingFips(fips);
+    setLocateError(null);
+
+    try {
+      const point = await fetchCountyCentroid(fips);
+      if (locateRequest.current !== requestId) {
+        return;
+      }
+      if (!point) {
+        setLocateError("That county has no map point in the public layer.");
+        return;
+      }
+      setSelected({ attrs, point });
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      mapPanelRef.current?.scrollIntoView({
+        behavior: reduceMotion ? "auto" : "smooth",
+        block: "nearest",
+      });
+    } catch (error) {
+      if (locateRequest.current !== requestId) {
+        return;
+      }
+      setLocateError(error instanceof Error ? error.message : "Couldn't locate that county");
+    } finally {
+      if (locateRequest.current === requestId) {
+        setLocatingFips(null);
+      }
+    }
+  }
 
   return (
     <div className="app">
@@ -151,19 +232,35 @@ export default function App() {
           </div>
         </div>
         <div className="topbar-status">
-          <span className={counties.length ? "status-dot ready" : "status-dot"} />
-          {counties.length
-            ? `${counties.length.toLocaleString()} counties loaded`
-            : countyLoadError ?? "Loading public county data"}
+          <span
+            className={
+              counties.length ? "status-dot ready" : countyLoadError ? "status-dot error" : "status-dot"
+            }
+          />
+          <span>
+            {counties.length
+              ? `${counties.length.toLocaleString()} counties loaded`
+              : countyLoadError ?? "Loading public county data"}
+          </span>
+          {countyLoadError ? (
+            <button
+              className="text-button"
+              type="button"
+              onClick={() => setCountyReload((current) => current + 1)}
+            >
+              Try again
+            </button>
+          ) : null}
         </div>
       </header>
 
       <main className="workspace">
-        <section className="map-panel" aria-label="U.S. risk map">
+        <section className="map-panel" aria-label="U.S. risk map" ref={mapPanelRef}>
           <AtlasMap
             scenarioId={scenarioId}
             preparedness={preparedness}
             selected={selected}
+            selectedFillColor={selectedFillColor}
             nuclearTarget={nuclearTarget}
             liveData={liveData}
             bomb={selectedBomb}
@@ -175,6 +272,18 @@ export default function App() {
         </section>
 
         <aside className="control-panel">
+          <section className="panel-section">
+            <CountySearch
+              counties={counties}
+              countyLoadError={countyLoadError}
+              locatingFips={locatingFips}
+              error={locateError}
+              onSelect={(county) => {
+                void selectKnownCounty(county);
+              }}
+            />
+          </section>
+
           <section className="panel-section">
             <div className="section-heading">
               <Activity size={18} />
@@ -188,6 +297,7 @@ export default function App() {
                     key={item.id}
                     className={`scenario-button ${scenarioId === item.id ? "active" : ""}`}
                     type="button"
+                    aria-pressed={scenarioId === item.id}
                     onClick={() => setScenarioId(item.id)}
                     title={item.description}
                   >
@@ -233,6 +343,7 @@ export default function App() {
                 <button
                   className={mapClickTarget === "home" ? "active" : ""}
                   type="button"
+                  aria-pressed={mapClickTarget === "home"}
                   onClick={() => setMapClickTarget("home")}
                 >
                   Home county
@@ -240,6 +351,7 @@ export default function App() {
                 <button
                   className={mapClickTarget === "blast" ? "active" : ""}
                   type="button"
+                  aria-pressed={mapClickTarget === "blast"}
                   onClick={() => setMapClickTarget("blast")}
                 >
                   Ground zero
@@ -255,6 +367,16 @@ export default function App() {
                   <strong>{formatTargetName(nuclearTarget)}</strong>
                 </div>
               </div>
+              {selected && nuclearTarget ? (
+                <p className="field-note">
+                  Home point is {formatDistanceKm(distanceKm(selected.point, nuclearTarget.point))} from
+                  ground zero.
+                </p>
+              ) : (
+                <p className="field-note">
+                  Set a ground zero to include modeled blast and fallout in the county score.
+                </p>
+              )}
               {selected ? (
                 <button
                   className="secondary-button"
@@ -268,7 +390,7 @@ export default function App() {
               ) : null}
 
               <label className="field-label" htmlFor="wind-direction">
-                Fallout wind direction
+                Fallout blows toward
               </label>
               <input
                 id="wind-direction"
@@ -278,7 +400,9 @@ export default function App() {
                 value={windDirection}
                 onChange={(event) => setWindDirection(Number(event.target.value))}
               />
-              <div className="range-readout">{windDirection} degrees</div>
+              <div className="range-readout">
+                {windDirection}° {compassLabel(windDirection)}
+              </div>
             </section>
           ) : null}
 
@@ -343,10 +467,11 @@ export default function App() {
               <span>Selected location</span>
               {selected ? (
                 <button
-                  className="icon-button"
+                  className={liveLoading ? "icon-button spinning" : "icon-button"}
                   type="button"
-                  onClick={() => selected && refreshLiveData(selected, setLiveData, setLiveLoading)}
-                  title="Refresh live feeds"
+                  aria-label="Refresh live feeds"
+                  disabled={liveLoading}
+                  onClick={() => setLiveNonce((current) => current + 1)}
                 >
                   <RefreshCw size={15} />
                 </button>
@@ -378,13 +503,20 @@ export default function App() {
                   <Metric label="Hazard" value={selectedScore.hazard} />
                   <Metric label="Vulnerability" value={selectedScore.vulnerability} />
                   <Metric label="Resilience" value={selectedScore.resilience} />
-                  <Metric label="Live pressure" value={selectedScore.livePenalty} />
+                  <Metric
+                    label={scenarioId === "nuclear" ? "Exposure" : "Live impact"}
+                    value={
+                      scenarioId === "nuclear"
+                        ? selectedScore.exposurePenalty
+                        : selectedScore.livePenalty
+                    }
+                  />
                 </div>
               </>
             ) : (
               <div className="empty-state">
                 <MapPin size={28} />
-                <p>No county selected</p>
+                <p>Search for a county or click the map.</p>
               </div>
             )}
           </section>
@@ -396,19 +528,13 @@ export default function App() {
               {liveLoading ? <span className="mini-loader">Refreshing</span> : null}
             </div>
             {liveData ? (
-              <div className="source-list">
-                {liveData.statuses.map((source) => (
-                  <div className="source-row" key={source.name}>
-                    <span className={`status-dot ${source.status}`} />
-                    <div>
-                      <strong>{source.name}</strong>
-                      <small>{source.detail}</small>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <LiveConditions liveData={liveData} />
             ) : (
-              <p className="field-note">Live source checks appear after a location is selected.</p>
+              <p className="field-note">
+                {liveLoading
+                  ? "Checking live feeds."
+                  : "Live source checks appear after a location is selected."}
+              </p>
             )}
           </section>
 
@@ -420,14 +546,20 @@ export default function App() {
             <RankingList
               title="Best modeled counties"
               rows={rankings.best}
-              scenarioId={scenarioId}
-              preparedness={preparedness}
+              locatingFips={locatingFips}
+              emptyMessage={countyLoadError ?? "Loading county rankings"}
+              onSelect={(county) => {
+                void selectKnownCounty(county);
+              }}
             />
             <RankingList
               title="Worst modeled counties"
               rows={rankings.worst}
-              scenarioId={scenarioId}
-              preparedness={preparedness}
+              locatingFips={locatingFips}
+              emptyMessage={countyLoadError ?? "Loading county rankings"}
+              onSelect={(county) => {
+                void selectKnownCounty(county);
+              }}
             />
           </section>
 
@@ -500,29 +632,36 @@ function Metric({ label, value }: { label: string; value: number }) {
 function RankingList({
   title,
   rows,
-  scenarioId,
-  preparedness,
+  locatingFips,
+  emptyMessage,
+  onSelect,
 }: {
   title: string;
-  rows: CountyAttributes[];
-  scenarioId: ScenarioId;
-  preparedness: Preparedness;
+  rows: RankedCounty[];
+  locatingFips: string | null;
+  emptyMessage: string;
+  onSelect: (county: CountyAttributes) => void;
 }) {
   return (
     <div className="ranking-list">
       <h3>{title}</h3>
       {rows.length ? (
-        rows.map((county) => {
-          const score = calculateCountyScore(county, scenarioId, preparedness).score;
-          return (
-            <div className="rank-row" key={county.STCOFIPS}>
-              <span>{countyName(county)}</span>
-              <strong style={{ color: scoreToColor(score) }}>{formatScore(score)}</strong>
-            </div>
-          );
-        })
+        rows.map((row) => (
+          <button
+            className="rank-row"
+            key={row.county.STCOFIPS}
+            type="button"
+            title={`Show ${countyName(row.county)}`}
+            onClick={() => onSelect(row.county)}
+          >
+            <span>{countyName(row.county)}</span>
+            <strong style={{ color: scoreToColor(row.score) }}>
+              {locatingFips === row.county.STCOFIPS ? "…" : formatScore(row.score)}
+            </strong>
+          </button>
+        ))
       ) : (
-        <p className="field-note">Loading county rankings</p>
+        <p className="field-note">{emptyMessage}</p>
       )}
     </div>
   );
@@ -540,13 +679,34 @@ function formatTargetName(target: MapTarget | null): string {
   return `${target.point.lat.toFixed(3)}, ${target.point.lng.toFixed(3)}`;
 }
 
-function refreshLiveData(
-  selected: SelectedCounty,
-  setLiveData: (value: LiveData | undefined) => void,
-  setLiveLoading: (value: boolean) => void,
-) {
-  setLiveLoading(true);
-  fetchLiveData(selected)
-    .then(setLiveData)
-    .finally(() => setLiveLoading(false));
+function readPreparedness(): Preparedness {
+  try {
+    const raw = window.localStorage.getItem(PREPAREDNESS_KEY);
+    if (!raw) {
+      return DEFAULT_PREPAREDNESS;
+    }
+
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return DEFAULT_PREPAREDNESS;
+    }
+
+    const value = parsed as Partial<Record<keyof Preparedness, unknown>>;
+    return {
+      supplyDays: boundedNumber(value.supplyDays, 0, 30, DEFAULT_PREPAREDNESS.supplyDays),
+      waterDays: boundedNumber(value.waterDays, 0, 14, DEFAULT_PREPAREDNESS.waterDays),
+      generator: value.generator === true,
+      evacuationPlan: value.evacuationPlan !== false,
+    };
+  } catch {
+    return DEFAULT_PREPAREDNESS;
+  }
+}
+
+function boundedNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.round(numberValue)));
 }
