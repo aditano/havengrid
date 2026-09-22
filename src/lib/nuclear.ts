@@ -85,6 +85,137 @@ export function getBlastRings(profile: BombProfile): BlastRing[] {
   ];
 }
 
+export type NuclearExposure = {
+  distanceKm: number;
+  insideRing?: string;
+  inFallout: boolean;
+};
+
+const RING_PENALTIES: Record<string, number> = {
+  Fireball: 72,
+  "Severe blast": 50,
+  "Heavy damage": 34,
+  "Thermal exposure": 20,
+  "Light damage": 12,
+};
+
+const COMPASS_LABELS = [
+  "N",
+  "NNE",
+  "NE",
+  "ENE",
+  "E",
+  "ESE",
+  "SE",
+  "SSE",
+  "S",
+  "SSW",
+  "SW",
+  "WSW",
+  "W",
+  "WNW",
+  "NW",
+  "NNW",
+];
+
+export function distanceKm(from: LatLngLiteral, to: LatLngLiteral): number {
+  const radiusKm = 6371;
+  const latDelta = toRadians(to.lat - from.lat);
+  const lngDelta = toRadians(to.lng - from.lng);
+  const lat1 = toRadians(from.lat);
+  const lat2 = toRadians(to.lat);
+  const haversine =
+    Math.sin(latDelta / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(lngDelta / 2) ** 2;
+
+  return 2 * radiusKm * Math.asin(Math.min(1, Math.sqrt(haversine)));
+}
+
+export function assessNuclearExposure(
+  home: LatLngLiteral,
+  groundZero: LatLngLiteral,
+  bomb: BombProfile,
+  windDirection: number,
+): NuclearExposure {
+  const distance = distanceKm(home, groundZero);
+  const rings = getBlastRings(bomb).slice().sort((a, b) => a.radiusKm - b.radiusKm);
+  const insideRing = rings.find((ring) => distance <= ring.radiusKm)?.label;
+  const inFallout = pointInPolygon(
+    home,
+    falloutPolygon(groundZero, bomb.yieldKt, windDirection),
+  );
+
+  return {
+    distanceKm: distance,
+    insideRing,
+    inFallout,
+  };
+}
+
+export function exposurePenalty(exposure: NuclearExposure): number {
+  const ringPenalty = exposure.insideRing ? (RING_PENALTIES[exposure.insideRing] ?? 0) : 0;
+  const falloutPenalty = exposure.inFallout ? 16 : 0;
+  return Math.min(72, Math.max(ringPenalty, falloutPenalty));
+}
+
+export function describeExposure(exposure: NuclearExposure): string {
+  const distance = formatDistanceKm(exposure.distanceKm);
+
+  if (exposure.distanceKm < 0.05) {
+    return "The home point is at the reference ground zero, inside the modeled fireball.";
+  }
+
+  if (exposure.insideRing) {
+    return `The home point is inside the modeled ${exposure.insideRing.toLowerCase()} zone, ${distance} from the reference ground zero.`;
+  }
+
+  if (exposure.inFallout) {
+    return `The home point is outside the blast rings and inside the modeled fallout plume, ${distance} from ground zero.`;
+  }
+
+  return `The home point is ${distance} from the reference ground zero, outside the modeled blast and fallout.`;
+}
+
+export function formatDistanceKm(distance: number): string {
+  if (distance < 10) {
+    return `${distance.toFixed(1)} km`;
+  }
+  return `${Math.round(distance)} km`;
+}
+
+export function compassLabel(degrees: number): string {
+  const normalized = ((degrees % 360) + 360) % 360;
+  const index = Math.round(normalized / 22.5) % COMPASS_LABELS.length;
+  return COMPASS_LABELS[index] ?? "N";
+}
+
+export function pointInPolygon(point: LatLngLiteral, polygon: LatLngLiteral[]): boolean {
+  let inside = false;
+
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const currentPoint = polygon[index];
+    const previousPoint = polygon[previous];
+    if (!currentPoint || !previousPoint) {
+      continue;
+    }
+
+    const crossesLatitude = currentPoint.lat > point.lat !== previousPoint.lat > point.lat;
+    if (!crossesLatitude) {
+      continue;
+    }
+
+    const longitudeAtLatitude =
+      ((previousPoint.lng - currentPoint.lng) * (point.lat - currentPoint.lat)) /
+        (previousPoint.lat - currentPoint.lat) +
+      currentPoint.lng;
+    if (point.lng < longitudeAtLatitude) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
 export function falloutPolygon(
   center: LatLngLiteral,
   yieldKt: number,
@@ -112,11 +243,11 @@ export function falloutPolygon(
 function offsetPoint(
   origin: LatLngLiteral,
   bearingDegrees: number,
-  distanceKm: number,
+  distance: number,
 ): LatLngLiteral {
   const radiusKm = 6371;
   const bearing = toRadians(bearingDegrees);
-  const angularDistance = distanceKm / radiusKm;
+  const angularDistance = distance / radiusKm;
   const lat1 = toRadians(origin.lat);
   const lon1 = toRadians(origin.lng);
 
