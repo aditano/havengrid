@@ -259,8 +259,16 @@ function resultStatus<T>(
   return {
     name,
     status: "error",
-    detail: result.reason instanceof Error ? result.reason.message : "Source failed",
+    detail: sourceErrorDetail(result.reason),
   };
+}
+
+export function sourceErrorDetail(reason: unknown): string {
+  const message = reason instanceof Error ? reason.message : "Source failed";
+  if (/token required/i.test(message)) {
+    return "This feed now requires an access token";
+  }
+  return message;
 }
 
 async function fetchWeatherAlerts(point: LatLngLiteral): Promise<WeatherAlert[]> {

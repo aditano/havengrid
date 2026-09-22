@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fetchCountyCentroid, readQueryCentroid } from "./sources";
+import { fetchCountyCentroid, readQueryCentroid, sourceErrorDetail } from "./sources";
 
 describe("county centroid lookup", () => {
   it("reads a geographic centroid from an ArcGIS query payload", () => {
@@ -18,5 +18,12 @@ describe("county centroid lookup", () => {
 
   it("refuses to interpolate a county id that is not a FIPS code", async () => {
     await expect(fetchCountyCentroid("06037' OR '1'='1")).rejects.toThrow(/FIPS/);
+  });
+
+  it("explains a token-gated feed instead of repeating the service code", () => {
+    expect(sourceErrorDetail(new Error("Power outage request failed: Token Required"))).toBe(
+      "This feed now requires an access token",
+    );
+    expect(sourceErrorDetail(new Error("NOAA alerts failed: 503"))).toBe("NOAA alerts failed: 503");
   });
 });

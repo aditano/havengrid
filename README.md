@@ -14,7 +14,7 @@ HavenGrid is an interactive U.S. preparedness simulator. Pick a county, choose a
 ## Public data sources
 
 - FEMA National Risk Index county feature layer: natural hazard risk, social vulnerability, and community resilience.
-- FEMA/EAGLE-I power outage feature layer: county-level reported customers out, updated hourly when the source is available.
+- FEMA/EAGLE-I power outage feature layer: county-level reported customers out, updated hourly when the source is available. The service sometimes requires an access token; the panel says when that feed is unavailable.
 - NOAA/National Weather Service active alerts API: current watches, warnings, advisories, and emergency alerts at the selected point.
 - USGS Earthquake Hazards Program GeoJSON feeds: recent earthquake events around the selected point.
 - U.S. Drought Monitor via FEMA map service: current drought categories.
