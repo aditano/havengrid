@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   averageLongitudeAntimeridianSafe,
   centroidFromRings,
   fetchCountyCentroid,
+  fetchEarthquakes,
   readQueryCentroid,
   sourceErrorDetail,
+  USGS_EARTHQUAKE_PAGE_SIZE,
 } from "./sources";
 
 describe("county centroid lookup", () => {
@@ -69,5 +71,52 @@ describe("antimeridian-safe county centroids", () => {
     expect(point!.lng).toBeLessThan(-170);
     expect(point!.lat).toBeGreaterThan(51);
     expect(point!.lat).toBeLessThan(54);
+  });
+});
+
+describe("USGS earthquake pagination", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("pages beyond the first response so SoCal risk is not truncated at 25", async () => {
+    const requests: URLSearchParams[] = [];
+    const pageSize = Math.max(USGS_EARTHQUAKE_PAGE_SIZE, 1000);
+
+    function feature(id: string, magnitude: number) {
+      return {
+        id,
+        properties: { mag: magnitude, place: `Event ${id}`, time: Date.now() },
+        geometry: { coordinates: [-118.25, 34.05, 10] as [number, number, number] },
+      };
+    }
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        requests.push(url.searchParams);
+        const offset = Number(url.searchParams.get("offset") ?? "1");
+        const limit = Number(url.searchParams.get("limit") ?? "0");
+        expect(limit).toBeGreaterThanOrEqual(1000);
+
+        const features =
+          offset === 1
+            ? Array.from({ length: pageSize }, (_, index) => feature(`p1-${index}`, 2.5))
+            : Array.from({ length: 185 }, (_, index) => feature(`p2-${index}`, 3.1));
+
+        return new Response(JSON.stringify({ features }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+
+    const rows = await fetchEarthquakes({ lat: 34.05, lng: -118.25 });
+
+    expect(USGS_EARTHQUAKE_PAGE_SIZE).toBeGreaterThanOrEqual(1000);
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    expect(Number(requests[1]?.get("offset"))).toBeGreaterThan(1);
+    expect(rows.length).toBe(pageSize + 185);
   });
 });

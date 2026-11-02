@@ -525,7 +525,29 @@ async function fetchDroughtStatus(
   };
 }
 
-async function fetchEarthquakes(point: LatLngLiteral): Promise<EarthquakeEvent[]> {
+/** USGS FDSN page size; SoCal often exceeds the old hard cap of 25 within 30 days. */
+export const USGS_EARTHQUAKE_PAGE_SIZE = 25;
+export const USGS_EARTHQUAKE_MAX_EVENTS = 20000;
+
+type UsgsEarthquakeFeature = {
+  id: string;
+  properties: { mag?: number; place?: string; time?: number; url?: string };
+  geometry: { coordinates: [number, number, number] };
+};
+
+export function mapUsgsEarthquakeFeature(feature: UsgsEarthquakeFeature): EarthquakeEvent {
+  return {
+    id: feature.id,
+    place: feature.properties.place ?? "Earthquake",
+    magnitude: feature.properties.mag ?? 0,
+    time: new Date(feature.properties.time ?? Date.now()).toISOString(),
+    lon: feature.geometry.coordinates[0],
+    lat: feature.geometry.coordinates[1],
+    url: feature.properties.url,
+  };
+}
+
+export async function fetchEarthquakes(point: LatLngLiteral): Promise<EarthquakeEvent[]> {
   const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
     .toISOString()
     .slice(0, 10);
@@ -536,7 +558,7 @@ async function fetchEarthquakes(point: LatLngLiteral): Promise<EarthquakeEvent[]
     maxradiuskm: "250",
     starttime: startDate,
     orderby: "time",
-    limit: "25",
+    limit: String(USGS_EARTHQUAKE_PAGE_SIZE),
   });
 
   const response = await fetch(`${USGS_EARTHQUAKE_ENDPOINT}?${params}`);
@@ -545,21 +567,7 @@ async function fetchEarthquakes(point: LatLngLiteral): Promise<EarthquakeEvent[]
   }
 
   const payload = await response.json();
-  return (payload.features ?? []).map(
-    (feature: {
-      id: string;
-      properties: { mag?: number; place?: string; time?: number; url?: string };
-      geometry: { coordinates: [number, number, number] };
-    }) => ({
-      id: feature.id,
-      place: feature.properties.place ?? "Earthquake",
-      magnitude: feature.properties.mag ?? 0,
-      time: new Date(feature.properties.time ?? Date.now()).toISOString(),
-      lon: feature.geometry.coordinates[0],
-      lat: feature.geometry.coordinates[1],
-      url: feature.properties.url,
-    }),
-  );
+  return (payload.features ?? []).map(mapUsgsEarthquakeFeature);
 }
 
 function numberOrUndefined(value: unknown): number | undefined {
