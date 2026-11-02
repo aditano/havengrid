@@ -341,6 +341,73 @@ export function readQueryCentroid(payload: unknown): LatLngLiteral | undefined {
   return { lat, lng };
 }
 
+/** Average longitudes, unwrapping dateline-crossing rings so the mean stays near the islands. */
+export function averageLongitudeAntimeridianSafe(longitudes: number[]): number {
+  if (!longitudes.length) {
+    return Number.NaN;
+  }
+
+  const min = Math.min(...longitudes);
+  const max = Math.max(...longitudes);
+  const values =
+    max - min > 180
+      ? longitudes.map((longitude) => (longitude > 0 ? longitude - 360 : longitude))
+      : longitudes;
+
+  return values.reduce((total, longitude) => total + longitude, 0) / values.length;
+}
+
+export function centroidFromRings(rings: number[][][]): LatLngLiteral | undefined {
+  const longitudes: number[] = [];
+  const latitudes: number[] = [];
+
+  for (const ring of rings) {
+    if (!Array.isArray(ring)) {
+      continue;
+    }
+    for (const point of ring) {
+      if (!Array.isArray(point) || point.length < 2) {
+        continue;
+      }
+      const lng = Number(point[0]);
+      const lat = Number(point[1]);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        continue;
+      }
+      if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        continue;
+      }
+      longitudes.push(lng);
+      latitudes.push(lat);
+    }
+  }
+
+  if (!longitudes.length) {
+    return undefined;
+  }
+
+  const lat = latitudes.reduce((total, value) => total + value, 0) / latitudes.length;
+  // Keep unwrapped western longitudes (e.g. -187) so Leaflet stays near the Aleutians
+  // instead of flipping to +173 on the opposite hemisphere.
+  const lng = averageLongitudeAntimeridianSafe(longitudes);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return undefined;
+  }
+
+  return { lat, lng };
+}
+
+function ringsFromGeometry(geometry: unknown): number[][][] | undefined {
+  if (!geometry || typeof geometry !== "object") {
+    return undefined;
+  }
+  const rings = (geometry as { rings?: unknown }).rings;
+  if (!Array.isArray(rings) || !rings.length) {
+    return undefined;
+  }
+  return rings as number[][][];
+}
+
 export async function fetchCountyCentroid(fips: string): Promise<LatLngLiteral | undefined> {
   if (!COUNTY_FIPS.test(fips)) {
     throw new Error("County id must be a 5-digit FIPS code");
@@ -350,9 +417,10 @@ export async function fetchCountyCentroid(fips: string): Promise<LatLngLiteral |
     f: "json",
     where: `STCOFIPS='${fips}'`,
     outFields: "STCOFIPS",
-    returnGeometry: "false",
+    returnGeometry: "true",
     returnCentroid: "true",
     outSR: "4326",
+    maxAllowableOffset: "0.25",
     resultRecordCount: "1",
   });
   const response = await fetch(`${NRI_COUNTY_LAYER}/query?${params}`);
@@ -363,6 +431,12 @@ export async function fetchCountyCentroid(fips: string): Promise<LatLngLiteral |
   const payload = await response.json();
   if (payload.error) {
     throw new Error(payload.error.message ?? "County location request failed");
+  }
+
+  const feature = payload.features?.[0];
+  const fromRings = centroidFromRings(ringsFromGeometry(feature?.geometry) ?? []);
+  if (fromRings) {
+    return fromRings;
   }
 
   return readQueryCentroid(payload);
