@@ -526,7 +526,7 @@ async function fetchDroughtStatus(
 }
 
 /** USGS FDSN page size; SoCal often exceeds the old hard cap of 25 within 30 days. */
-export const USGS_EARTHQUAKE_PAGE_SIZE = 25;
+export const USGS_EARTHQUAKE_PAGE_SIZE = 1000;
 export const USGS_EARTHQUAKE_MAX_EVENTS = 20000;
 
 type UsgsEarthquakeFeature = {
@@ -551,23 +551,40 @@ export async function fetchEarthquakes(point: LatLngLiteral): Promise<Earthquake
   const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
     .toISOString()
     .slice(0, 10);
-  const params = new URLSearchParams({
-    format: "geojson",
-    latitude: String(point.lat),
-    longitude: String(point.lng),
-    maxradiuskm: "250",
-    starttime: startDate,
-    orderby: "time",
-    limit: String(USGS_EARTHQUAKE_PAGE_SIZE),
-  });
+  const events: EarthquakeEvent[] = [];
+  // USGS FDSN offset is 1-based.
+  let offset = 1;
 
-  const response = await fetch(`${USGS_EARTHQUAKE_ENDPOINT}?${params}`);
-  if (!response.ok) {
-    throw new Error(`USGS earthquake request failed: ${response.status}`);
+  while (events.length < USGS_EARTHQUAKE_MAX_EVENTS) {
+    const remaining = USGS_EARTHQUAKE_MAX_EVENTS - events.length;
+    const pageSize = Math.min(USGS_EARTHQUAKE_PAGE_SIZE, remaining);
+    const params = new URLSearchParams({
+      format: "geojson",
+      latitude: String(point.lat),
+      longitude: String(point.lng),
+      maxradiuskm: "250",
+      starttime: startDate,
+      orderby: "time",
+      limit: String(pageSize),
+      offset: String(offset),
+    });
+
+    const response = await fetch(`${USGS_EARTHQUAKE_ENDPOINT}?${params}`);
+    if (!response.ok) {
+      throw new Error(`USGS earthquake request failed: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const features = (payload.features ?? []) as UsgsEarthquakeFeature[];
+    events.push(...features.map(mapUsgsEarthquakeFeature));
+
+    if (features.length < pageSize) {
+      break;
+    }
+    offset += features.length;
   }
 
-  const payload = await response.json();
-  return (payload.features ?? []).map(mapUsgsEarthquakeFeature);
+  return events;
 }
 
 function numberOrUndefined(value: unknown): number | undefined {
