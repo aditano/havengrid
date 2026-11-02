@@ -563,20 +563,20 @@ export default function App() {
             />
           </section>
 
-          <section className="source-links">
-            <a href="https://hazards.fema.gov/nri/data-resources" target="_blank" rel="noreferrer">
+          <section className="source-links" aria-label="Public data sources">
+            <a href="https://hazards.fema.gov/nri/data-resources" target="_blank" rel="noopener noreferrer">
               FEMA NRI
             </a>
-            <a href="https://www.weather.gov/documentation/services-web-alerts" target="_blank" rel="noreferrer">
+            <a href="https://www.weather.gov/documentation/services-web-alerts" target="_blank" rel="noopener noreferrer">
               NOAA alerts
             </a>
-            <a href="https://gis.fema.gov/arcgis/rest/services/Partner/PowerOutages_EAGLE_I/FeatureServer" target="_blank" rel="noreferrer">
+            <a href="https://gis.fema.gov/arcgis/rest/services/Partner/PowerOutages_EAGLE_I/FeatureServer" target="_blank" rel="noopener noreferrer">
               EAGLE-I outages
             </a>
-            <a href="https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php" target="_blank" rel="noreferrer">
+            <a href="https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php" target="_blank" rel="noopener noreferrer">
               USGS quakes
             </a>
-            <a href="https://www.drought.gov/data-maps-tools/us-drought-monitor" target="_blank" rel="noreferrer">
+            <a href="https://www.drought.gov/data-maps-tools/us-drought-monitor" target="_blank" rel="noopener noreferrer">
               Drought Monitor
             </a>
           </section>

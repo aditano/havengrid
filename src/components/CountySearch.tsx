@@ -35,8 +35,10 @@ export default function CountySearch({
         id="county-search"
         role="combobox"
         aria-autocomplete="list"
+        aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
+        aria-busy={Boolean(locatingFips)}
         aria-activedescendant={open && activeResult?.STCOFIPS ? `${listId}-${activeResult.STCOFIPS}` : undefined}
         autoComplete="off"
         spellCheck={false}
@@ -105,7 +107,11 @@ export default function CountySearch({
           )}
         </ul>
       ) : null}
-      {locatingFips && !open ? <p className="field-note">Locating that county on the map.</p> : null}
+      {locatingFips && !open ? (
+        <p className="field-note" aria-live="polite">
+          Locating that county on the map.
+        </p>
+      ) : null}
       {error ? (
         <p className="field-note search-error" role="alert">
           {error}
