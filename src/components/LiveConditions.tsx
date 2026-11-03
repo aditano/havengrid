@@ -88,7 +88,7 @@ function QuakePlace({ quake }: { quake: EarthquakeEvent }) {
 
   return (
     <p>
-      <a href={quake.url} target="_blank" rel="noreferrer">
+      <a href={quake.url} target="_blank" rel="noopener noreferrer">
         {quake.place}
       </a>
     </p>

@@ -75,6 +75,7 @@ export default function AtlasMap({
         maxZoom={11}
         preferCanvas
         scrollWheelZoom
+        aria-label="Interactive United States county risk map"
         maxBounds={[
           [16, -170],
           [72, -52],
